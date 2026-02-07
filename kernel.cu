@@ -78,9 +78,9 @@ __global__ void addMatrix(float* A, const float* B, const float* C, int size) {
     }
     else {
         //Get the j for the thread
-        int j = threadC % size;
+        int i = threadC % size;
         //Loop over i in the thread
-        for (int i = 0; i < size; i++) {
+        for (int j = 0; j < size; j++) {
             //Add the element for that thread
             A[i + j * size] = B[i + j * size] + C[i + j * size];
         }
