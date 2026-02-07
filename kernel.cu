@@ -77,11 +77,13 @@ __global__ void addMatrix(float* A, const float* B, const float* C, int size) {
         return;
     }
     else {
-        //Get the i and j for the thread
-        int i = threadC % size;
-        int j = threadC / size;
-        //Add the element for that thread
-        A[i + j * size] = B[i + j * size] + C[i + j * size];
+        //Get the j for the thread
+        int j = threadC % size;
+        //Loop over i in the thread
+        for (int i = 0; i < size; i++) {
+            //Add the element for that thread
+            A[i + j * size] = B[i + j * size] + C[i + j * size];
+        }
     }
 }
 
