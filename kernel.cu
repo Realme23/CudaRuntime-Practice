@@ -13,23 +13,24 @@ float nextRand() {
     return ((seed) / 1.0f);
 }
 
-__host__ void Panic(std::string error_message) {
+__host__ void Panic(std::string error_message, cudaError_t error) {
     std::cerr << "Panic called with: " << error_message << std::endl;
+    std::cerr << "Error: " << cudaGetErrorString(error) << std::endl;
     std::terminate();
 }
 
 __host__ void CudaMallocOrPanic(float*& target, std::size_t size) {
     cudaError_t result = cudaMalloc(&target, (unsigned long)size);
     if (result != cudaSuccess) {
-        Panic("CudaMalloc failed!");
+        Panic("CudaMalloc failed!", result);
     }
     return;
 }
 
 __host__ void CudaMemcpyOrPanic(float*& source, float*& target, std::size_t size, cudaMemcpyKind kind) {
-    cudaError_t result = cudaMemcpy(&target, &source, (unsigned long)size, kind);
+    cudaError_t result = cudaMemcpy(target, source, (unsigned long)size, kind);
     if (result != cudaSuccess) {
-        Panic("CudaMemcpy failed!");
+        Panic("CudaMemcpy failed!", result);
     }
     return;
 }
@@ -43,15 +44,20 @@ __host__ std::tuple<float*, float*, float*> hostMultiplyMatrixVectorSetup(float 
     CudaMallocOrPanic(deviceInputMatrix, numBytesMatrix);
     CudaMallocOrPanic(deviceOutputVector, numBytesVector);
 
+    //cudaError_t result = cudaMemcpy(deviceInputVector, hostInputVector, (unsigned long)numBytesVector, cudaMemcpyHostToDevice);
+    //if (result != cudaSuccess) {
+    //    Panic("CudaMemcpy failed!");
+    //}
+
     CudaMemcpyOrPanic(hostInputVector, deviceInputVector, numBytesVector, cudaMemcpyHostToDevice);
     CudaMemcpyOrPanic(hostInputMatrix, deviceInputMatrix, numBytesMatrix, cudaMemcpyHostToDevice);
-    return std::make_tuple(deviceOutputVector, deviceInputMatrix, deviceOutputVector);
+    return std::make_tuple(deviceInputVector, deviceInputMatrix, deviceOutputVector);
 }
 
 __host__ void CudaFreeOrPanic(float* devicePointer) {
     cudaError_t cudaResult = cudaFree(devicePointer);
     if (cudaResult != cudaSuccess) {
-        Panic("CudaFree failed!");
+        Panic("CudaFree failed!", cudaResult);
     }
 }
 
@@ -62,6 +68,7 @@ __host__ void hostMultiplyMatrixVectorClose(float* deviceInputVector, float* dev
     CudaMemcpyOrPanic(deviceOutputVector, hostOutputVector, numBytesVector, cudaMemcpyDeviceToHost);
 
     CudaFreeOrPanic(deviceInputVector);
+
     CudaFreeOrPanic(deviceInputMatrix);
     CudaFreeOrPanic(deviceOutputVector);
     return;
@@ -82,6 +89,15 @@ __global__ void MatrixMultiplyKernelDevice(float* deviceInputVector, float* devi
 template<unsigned int sizeBlocks>
 __host__ void hostMultiplyMatrixVectorCall(float* deviceInputVector, float* deviceInputMatrix, float* deviceOutputVector, std::size_t size) {
     MatrixMultiplyKernelDevice<<<ceil(size*1.0/sizeBlocks), sizeBlocks>>>(deviceInputVector, deviceInputMatrix, deviceOutputVector, size);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        Panic("Error: ", err);
+    }
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        Panic("Error: ", err);
+    }
 }
 
 __host__ void fillFloats(float* input, std::size_t size) {
@@ -100,21 +116,23 @@ __host__ void showFloats(float* input, std::size_t size) {
 
 int main()
 {
-    constexpr int size = 32;
+    constexpr int size = 3;
     float* hostInputVector = new alignas(32) float[size];
     float* hostInputMatrix = new alignas(32) float[size * size];
     float* hostOutputVector = new alignas(32) float[size];
 
     fillFloats(hostInputMatrix, size * size);
     fillFloats(hostInputVector, size);
-    
+    showFloats(hostInputMatrix, std::min(size*size, 10));
+    showFloats(hostInputVector, std::min(size, 10));
+
     auto deviceResults = hostMultiplyMatrixVectorSetup(hostInputVector, hostInputMatrix, size);
     float* deviceInputVector = std::get<0>(deviceResults);
     float* deviceInputMatrix = std::get<1>(deviceResults);
     float* deviceOutputVector = std::get<2>(deviceResults);
 
-    hostMultiplyMatrixVectorCall<128>(hostInputVector, hostInputMatrix, hostOutputVector, size);
-    hostMultiplyMatrixVectorClose(deviceOutputVector, deviceInputMatrix, deviceOutputVector, hostOutputVector, size);
+    hostMultiplyMatrixVectorCall<128>(deviceInputVector, deviceInputMatrix, deviceOutputVector, size);
+    hostMultiplyMatrixVectorClose(deviceInputVector, deviceInputMatrix, deviceOutputVector, hostOutputVector, size);
     showFloats(hostOutputVector, std::min(size, 10));
 
     // cudaDeviceReset must be called before exiting in order for profiling and
